@@ -54,7 +54,7 @@ fastf1.Cache.enable_cache('f1_cache')
 
 # Sidebar Control Architecture
 st.sidebar.markdown("<h2 style='color: #FF1801; font-weight: 900; margin-bottom: 15px;'>📊 RACE CONTROL</h2>", unsafe_allow_html=True)
-year = st.sidebar.selectbox("Select Season", [2026, 2025, 2024, 2023], index=1) # Set default to loaded 2025 data
+year = st.sidebar.selectbox("Select Season", [2026, 2025, 2024, 2023], index=1)
 location = st.sidebar.text_input("Track Circuit Location", "Monaco")
 session_type = st.sidebar.selectbox("Session Type", ["R", "Q"], format_func=lambda x: "Race" if x == "R" else "Qualifying", index=1)
 
@@ -72,10 +72,16 @@ with st.sidebar.expander("📖 TELEMETRY DICTIONARY"):
     Continuous lines tracking speed versus physical track position meters.
     """)
 
-drivers_list, session_meta = [], None
+# CRITICAL: Memory-Safe Caching for Session Loading
+@st.cache_data(max_entries=5, show_spinner="📡 Initializing satellite circuit feed...")
+def load_f1_session(year, location, session_type):
+    sess = fastf1.get_session(year, location, session_type)
+    sess.load(telemetry=False, laps=True, weather=False, messages=False)
+    return sess
+
+drivers_list = []
 try:
-    session = fastf1.get_session(year, location, session_type)
-    session.load(telemetry=False, laps=True, weather=False, messages=False)
+    session = load_f1_session(year, location, session_type)
     drivers_list = session.laps['Driver'].unique().tolist()
 except Exception as e:
     st.error(f"Error establishing hardware telemetry link: {e}")
@@ -86,12 +92,13 @@ if drivers_list:
     driver1 = st.sidebar.selectbox("Primary Target Driver", drivers_list, index=0)
     driver2 = st.sidebar.selectbox("Comparison Target Driver", drivers_list, index=min(1, len(drivers_list)-1))
 
-    @st.cache_data(show_spinner="🧮 Demultiplexing spatial sensor arrays...")
+    # CRITICAL: Memory-Safe Caching for Deep Telemetry Arrays (Max 5 items in RAM)
+    @st.cache_data(max_entries=5, show_spinner="🧮 Demultiplexing spatial sensor arrays...")
     def get_telemetry_data(year, location, session_type, d1, d2):
-        session = fastf1.get_session(year, location, session_type)
-        session.load(telemetry=True, laps=True, weather=False, messages=False)
-        lap1 = session.laps.pick_driver(d1).pick_fastest()
-        lap2 = session.laps.pick_driver(d2).pick_fastest()
+        sess = fastf1.get_session(year, location, session_type)
+        sess.load(telemetry=True, laps=True, weather=False, messages=False)
+        lap1 = sess.laps.pick_driver(d1).pick_fastest()
+        lap2 = sess.laps.pick_driver(d2).pick_fastest()
         
         # Pull dynamic hexadecimal color profiles from team tags safely
         try:
@@ -117,7 +124,7 @@ if drivers_list:
         agg1 = np.abs(np.diff(tel1['Throttle'])).mean() * 10
         agg2 = np.abs(np.diff(tel2['Throttle'])).mean() * 10
 
-        # --- DATASTREAM CARDS ROW (DYNAMCIALLY COLORED BY TEAM ACCENTS) ---
+        # --- DATASTREAM CARDS ROW ---
         col1, col2 = st.columns(2)
         
         with col1:
